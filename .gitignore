@@ -1,0 +1,24 @@
+# Maven build outputs
+target/
+
+# Local production dist outputs
+dist/
+
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/
+
+# Local sensitive database configurations
+config.properties
+
+# Embedded Maven distribution
+apache-maven-3.9.6/
+
+# IDE / Editor folders
+.vscode/
+.idea/
+*.iml
+
+# OS-specific files
+.DS_Store
+Thumbs.db

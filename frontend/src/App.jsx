@@ -1,0 +1,547 @@
+import React, { useState, useEffect, useRef } from 'react';
+import './App.css';
+
+function App() {
+  // State
+  const [slots, setSlots] = useState([]);
+  const [revenue, setRevenue] = useState(380);
+  const [occupiedCount, setOccupiedCount] = useState(0);
+  const [vacantCount, setVacantCount] = useState(20);
+  const [isConnected, setIsConnected] = useState(false);
+
+  // Forms inputs
+  const [parkPlate, setParkPlate] = useState('');
+  const [parkType, setParkType] = useState('CAR');
+  const [exitPlate, setExitPlate] = useState('');
+  const [exitHours, setExitHours] = useState(1);
+
+  // Logs
+  const [logs, setLogs] = useState([]);
+  
+  // Modals
+  const [receipt, setReceipt] = useState(null);
+
+  // Refs for scrolling logs
+  const logsEndRef = useRef(null);
+
+  // API URL
+  // We determine host dynamically, fallback to localhost
+  const API_URL = window.location.origin.includes('localhost') 
+    ? 'http://localhost:8080/api'
+    : `${window.location.origin}/api`;
+
+  // Sandbox fallback helpers
+  const platePrefixes = ['MH-12', 'DL-3C', 'KA-03', 'KA-51', 'HR-26', 'UP-16', 'MH-02'];
+  const mockBrands = {
+    'Car': ['Tesla Model Y', 'Honda Civic', 'Toyota Camry', 'BMW 3 Series', 'Audi A4', 'Hyundai i20'],
+    'Bike': ['Yamaha R15', 'Royal Enfield', 'KTM Duke', 'Honda Activa', 'Harley Davidson']
+  };
+
+  const generateRandomPlate = () => {
+    const prefix = platePrefixes[Math.floor(Math.random() * platePrefixes.length)];
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const letters = alphabet[Math.floor(Math.random() * 26)] + alphabet[Math.floor(Math.random() * 26)];
+    const numbers = Math.floor(1000 + Math.random() * 9000);
+    return `${prefix}-${letters}-${numbers}`;
+  };
+
+  const addLog = (message, type = 'info') => {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setLogs(prev => [...prev, { time: timeStr, text: message, type }]);
+  };
+
+  // Seed local slots for sandbox fallback
+  const seedSandbox = () => {
+    const initialSlots = [];
+    const capacity = 20;
+    let occCount = 0;
+    
+    for (let i = 1; i <= capacity; i++) {
+      const isOccupied = Math.random() > 0.65;
+      if (isOccupied) {
+        occCount++;
+        const type = Math.random() > 0.5 ? 'Car' : 'Bike';
+        const brands = mockBrands[type];
+        initialSlots.push({
+          slotNumber: i,
+          occupied: true,
+          vehicleNumber: generateRandomPlate(),
+          vehicleType: type,
+          brand: brands[Math.floor(Math.random() * brands.length)],
+          entryTime: new Date().toISOString()
+        });
+      } else {
+        initialSlots.push({
+          slotNumber: i,
+          occupied: false,
+          vehicleNumber: null,
+          vehicleType: null,
+          brand: null,
+          entryTime: null
+        });
+      }
+    }
+    setSlots(initialSlots);
+    setOccupiedCount(occCount);
+    setVacantCount(capacity - occCount);
+    setRevenue(380);
+  };
+
+  // Check backend server status
+  const checkConnection = async () => {
+    try {
+      const res = await fetch(`${API_URL}/status`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.connected) {
+          setIsConnected(true);
+          return true;
+        }
+      }
+    } catch (e) {
+      // Offline
+    }
+    setIsConnected(false);
+    return false;
+  };
+
+  // Fetch slots & revenue from Spring Boot
+  const fetchData = async () => {
+    try {
+      const slotsRes = await fetch(`${API_URL}/slots`);
+      if (!slotsRes.ok) throw new Error('Slots fail');
+      const dbSlots = await slotsRes.json();
+      
+      const mapped = dbSlots.map(dbSlot => ({
+        slotNumber: dbSlot.slotNumber,
+        occupied: dbSlot.vehicleNumber !== null,
+        vehicleNumber: dbSlot.vehicleNumber,
+        vehicleType: dbSlot.vehicleType === 'CAR' ? 'Car' : 'Bike',
+        brand: dbSlot.vehicleType === 'CAR' ? 'Tesla Model S' : 'Royal Enfield',
+        entryTime: dbSlot.entryTime
+      }));
+
+      setSlots(mapped);
+      
+      const occupied = mapped.filter(s => s.occupied).length;
+      setOccupiedCount(occupied);
+      setVacantCount(mapped.length - occupied);
+
+      const revRes = await fetch(`${API_URL}/revenue`);
+      if (revRes.ok) {
+        const revData = await revRes.json();
+        setRevenue(revData.revenue);
+      }
+    } catch (err) {
+      setIsConnected(false);
+    }
+  };
+
+  // Mount logic
+  useEffect(() => {
+    const init = async () => {
+      const connected = await checkConnection();
+      if (connected) {
+        await fetchData();
+        addLog("Connected to remote Railway MySQL Database cluster via Spring Boot REST API.", "success");
+      } else {
+        seedSandbox();
+        addLog("Local database offline. Initialized local Sandbox simulation.", "info");
+      }
+    };
+    init();
+
+    // Background sync interval (every 3 seconds)
+    const interval = setInterval(async () => {
+      const connected = await checkConnection();
+      if (connected) {
+        await fetchData();
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [isConnected]);
+
+  // Scroll logs to bottom
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  // Park operation
+  const handlePark = async (e) => {
+    if (e) e.preventDefault();
+    if (!parkPlate.trim()) return;
+    const plate = parkPlate.trim().toUpperCase();
+
+    if (isConnected) {
+      try {
+        const res = await fetch(`${API_URL}/slots/park`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plate, type: parkType })
+        });
+        const data = await res.json();
+        if (data.success) {
+          addLog(`Vehicle [${plate}] parked successfully at Slot #${data.slotNumber}.`, 'success');
+          setParkPlate('');
+          await fetchData();
+        } else {
+          addLog(`Parking failed: ${data.message}`, 'error');
+        }
+      } catch (err) {
+        addLog("Communication failure with REST backend.", 'error');
+      }
+    } else {
+      // Sandbox fallback
+      const freeIdx = slots.findIndex(s => !s.occupied);
+      if (freeIdx === -1) {
+        addLog("Parking failed: slots are full.", 'error');
+        return;
+      }
+      
+      const newSlots = [...slots];
+      newSlots[freeIdx] = {
+        slotNumber: freeIdx + 1,
+        occupied: true,
+        vehicleNumber: plate,
+        vehicleType: parkType === 'CAR' ? 'Car' : 'Bike',
+        brand: parkType === 'CAR' ? 'BMW 3 Series' : 'KTM Duke',
+        entryTime: new Date().toISOString()
+      };
+      
+      setSlots(newSlots);
+      setOccupiedCount(prev => prev + 1);
+      setVacantCount(prev => prev - 1);
+      addLog(`[Sandbox] Parked Vehicle [${plate}] at Slot #${freeIdx + 1}.`, 'success');
+      setParkPlate('');
+    }
+  };
+
+  // Exit operation
+  const handleExit = async (e) => {
+    if (e) e.preventDefault();
+    if (!exitPlate.trim()) return;
+    const plate = exitPlate.trim().toUpperCase();
+
+    if (isConnected) {
+      try {
+        const res = await fetch(`${API_URL}/slots/release`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plate, hours: exitHours })
+        });
+        const data = await res.json();
+        if (data.success) {
+          const type = slots.find(s => s.vehicleNumber === plate)?.vehicleType || 'Car';
+          addLog(`Vehicle [${plate}] exited Slot #${data.slotNumber}. Paid: ₹${data.fee}`, 'success');
+          
+          setReceipt({
+            plate,
+            type,
+            hours: exitHours,
+            rate: type === 'Car' ? 50 : 20,
+            fee: data.fee,
+            slotNumber: data.slotNumber
+          });
+
+          setExitPlate('');
+          setExitHours(1);
+          await fetchData();
+        } else {
+          addLog(`Checkout failed: ${data.message}`, 'error');
+        }
+      } catch (err) {
+        addLog("Communication failure with REST backend.", 'error');
+      }
+    } else {
+      // Sandbox fallback
+      const idx = slots.findIndex(s => s.occupied && s.vehicleNumber === plate);
+      if (idx === -1) {
+        addLog(`Checkout failed: vehicle [${plate}] not found.`, 'error');
+        return;
+      }
+
+      const slot = slots[idx];
+      const rate = slot.vehicleType === 'Car' ? 30 : 15;
+      const fee = exitHours * rate;
+
+      setReceipt({
+        plate,
+        type: slot.vehicleType,
+        hours: exitHours,
+        rate,
+        fee,
+        slotNumber: slot.slotNumber
+      });
+
+      const newSlots = [...slots];
+      newSlots[idx] = {
+        slotNumber: idx + 1,
+        occupied: false,
+        vehicleNumber: null,
+        vehicleType: null,
+        brand: null,
+        entryTime: null
+      };
+
+      setSlots(newSlots);
+      setOccupiedCount(prev => prev - 1);
+      setVacantCount(prev => prev + 1);
+      setRevenue(prev => prev + fee);
+      addLog(`[Sandbox] Vehicle [${plate}] exited Slot #${slot.slotNumber}. Paid: $${fee}`, 'success');
+      setExitPlate('');
+      setExitHours(1);
+    }
+  };
+
+  // Slot click helper
+  const handleSlotClick = (slot) => {
+    if (slot.occupied) {
+      setExitPlate(slot.vehicleNumber);
+      // Auto duration hours calculation
+      if (slot.entryTime) {
+        try {
+          const entry = new Date(slot.entryTime);
+          const diffMs = new Date() - entry;
+          const mins = diffMs / 60000;
+          const hours = Math.max(1, Math.ceil(mins / 60));
+          setExitHours(hours);
+        } catch (e) {
+          setExitHours(1);
+        }
+      }
+    } else {
+      setParkPlate(generateRandomPlate());
+    }
+  };
+
+  return (
+    <>
+      {/* Background glowing globes */}
+      <div className="glow-bg glow-1"></div>
+      <div className="glow-bg glow-2"></div>
+
+      <div className="app-container">
+        {/* Header */}
+        <header className="app-header">
+          <div className="logo-section">
+            <span className="logo-icon">🚗</span>
+            <span className="logo-text">AutoPark Cloud</span>
+          </div>
+          <div className={`api-badge ${isConnected ? 'connected' : 'disconnected'}`}>
+            <span className="badge-dot"></span>
+            <span>{isConnected ? 'Railway DB Connected' : 'Demo Sandbox Mode'}</span>
+          </div>
+        </header>
+
+        {/* Stats */}
+        <section className="stats-container">
+          <div className="glass-panel stat-card">
+            <span className="stat-icon">📊</span>
+            <div className="stat-details">
+              <span className="stat-num">{slots.length || 20}</span>
+              <span className="stat-label">Total capacity</span>
+            </div>
+          </div>
+          <div className="glass-panel stat-card">
+            <span className="stat-icon">🟢</span>
+            <div className="stat-details">
+              <span className="stat-num" style={{ color: 'var(--color-vacant)' }}>{vacantCount}</span>
+              <span className="stat-label">Vacant Slots</span>
+            </div>
+          </div>
+          <div className="glass-panel stat-card">
+            <span className="stat-icon">🔴</span>
+            <div className="stat-details">
+              <span className="stat-num" style={{ color: 'var(--color-occupied)' }}>{occupiedCount}</span>
+              <span className="stat-label">Occupied Slots</span>
+            </div>
+          </div>
+          <div className="glass-panel stat-card">
+            <span className="stat-icon" style={{ color: '#f59e0b' }}>💰</span>
+            <div className="stat-details">
+              <span className="stat-num" style={{ color: '#f59e0b' }}>
+                {isConnected ? '₹' : '$'}{revenue}
+              </span>
+              <span className="stat-label">Total Revenue</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Dashboard Grid */}
+        <main className="dashboard-grid">
+          {/* Left panel - Forms */}
+          <div className="left-column">
+            {/* Park vehicle form */}
+            <div className="glass-panel form-card">
+              <h3>Park a Vehicle</h3>
+              <form onSubmit={handlePark}>
+                <div className="form-group">
+                  <label>License Plate Number</label>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    placeholder="e.g. MH12AB1234"
+                    value={parkPlate} 
+                    onChange={e => setParkPlate(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Vehicle Type</label>
+                  <div className="type-buttons">
+                    <button 
+                      type="button" 
+                      className={`type-btn ${parkType === 'CAR' ? 'active' : ''}`}
+                      onClick={() => setParkType('CAR')}
+                    >
+                      Car (₹50/h)
+                    </button>
+                    <button 
+                      type="button" 
+                      className={`type-btn ${parkType === 'BIKE' ? 'active' : ''}`}
+                      onClick={() => setParkType('BIKE')}
+                    >
+                      Bike (₹20/h)
+                    </button>
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-submit btn-primary">
+                  Park Vehicle
+                </button>
+              </form>
+            </div>
+
+            {/* Exit vehicle form */}
+            <div className="glass-panel form-card">
+              <h3>Process Departure</h3>
+              <form onSubmit={handleExit}>
+                <div className="form-group">
+                  <label>License Plate Number</label>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    placeholder="Enter plate to exit"
+                    value={exitPlate} 
+                    onChange={e => setExitPlate(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Hours Parked: {exitHours}h</label>
+                  <input 
+                    type="range" 
+                    min="1" 
+                    max="24" 
+                    className="form-control" 
+                    style={{ padding: '0px', height: '14px' }}
+                    value={exitHours}
+                    onChange={e => setExitHours(parseInt(e.target.value))}
+                  />
+                </div>
+                <button type="submit" className="btn btn-submit btn-success">
+                  Release & Invoiced
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* Right panel - Slot grid map */}
+          <div className="glass-panel map-panel">
+            <div className="map-header">
+              <h3>Real-Time Slot Map</h3>
+              <p className="map-tip">💡 Click a slot to pre-fill checkout or park a car!</p>
+            </div>
+
+            <div className="slots-grid">
+              {slots.map(slot => (
+                <div 
+                  key={slot.slotNumber} 
+                  className={`slot-card ${slot.occupied ? 'occupied' : 'vacant'}`}
+                  onClick={() => handleSlotClick(slot)}
+                >
+                  <span className="slot-num">SLOT #{slot.slotNumber}</span>
+                  {slot.occupied ? (
+                    <>
+                      <span className="slot-status">OCCUPIED</span>
+                      <span className="slot-plate">{slot.vehicleNumber}</span>
+                      <span className="slot-details">{slot.brand || `${slot.vehicleType}`}</span>
+                      <span className="slot-details" style={{ opacity: 0.6 }}>
+                        In: {slot.entryTime && slot.entryTime.includes('T') 
+                          ? new Date(slot.entryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                          : slot.entryTime?.substring(11) || '—'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="slot-status">VACANT</span>
+                      <span className="slot-details" style={{ opacity: 0.6 }}>Tap to Park</span>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
+
+        {/* Logs */}
+        <section className="glass-panel logs-panel">
+          <span className="logs-title">System Activity Logs (MySQL Connection Broker)</span>
+          <div className="logs-list">
+            {logs.map((log, index) => (
+              <div key={index} className="log-item">
+                <span className="log-time">[{log.time}]</span>
+                <span className={`log-text log-msg ${log.type === 'success' ? 'success' : log.type === 'error' ? 'error' : ''}`}>
+                  {log.text}
+                </span>
+              </div>
+            ))}
+            <div ref={logsEndRef} />
+          </div>
+        </section>
+      </div>
+
+      {/* Modal invoice receipt */}
+      {receipt && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-check">✓</div>
+            <span className="modal-title">DEPARTURE RECEIPT</span>
+            <div className="modal-grid">
+              <div className="modal-row">
+                <span className="modal-label">SLOT NUMBER:</span>
+                <span className="modal-val">#{receipt.slotNumber}</span>
+              </div>
+              <div className="modal-row">
+                <span className="modal-label">VEHICLE PLATE:</span>
+                <span className="modal-val">{receipt.plate}</span>
+              </div>
+              <div className="modal-row">
+                <span className="modal-label">VEHICLE TYPE:</span>
+                <span className="modal-val">{receipt.type}</span>
+              </div>
+              <div className="modal-row">
+                <span className="modal-label">HOURS PARKED:</span>
+                <span className="modal-val">{receipt.hours} Hours</span>
+              </div>
+              <div className="modal-row">
+                <span className="modal-label">HOURLY RATE:</span>
+                <span className="modal-val">{isConnected ? '₹' : '$'}{receipt.rate} / hour</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <span className="modal-fee-label">Total Fee Paid</span>
+              <span className="modal-fee">{isConnected ? '₹' : '$'}{receipt.fee}</span>
+            </div>
+            <button className="btn btn-primary" style={{ width: '180px' }} onClick={() => setReceipt(null)}>
+              Print & Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+export default App;

@@ -1,0 +1,8 @@
+# AutoPark MySQL Configurations Template
+# Copy this file to config.properties and fill in your connection details
+
+db.host=localhost
+db.port=3306
+db.name=autopark
+db.user=root
+db.pass=your_password
