@@ -2,7 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 function App() {
-  // State
+  // Authentication State
+  const [token, setToken] = useState(localStorage.getItem('token') || null);
+  const [userSession, setUserSession] = useState(null);
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authRole, setAuthRole] = useState('ROLE_ADMIN');
+
+  // Parking Dashboard State
   const [slots, setSlots] = useState([]);
   const [revenue, setRevenue] = useState(380);
   const [occupiedCount, setOccupiedCount] = useState(0);
@@ -24,11 +34,14 @@ function App() {
   // Refs for scrolling logs
   const logsEndRef = useRef(null);
 
-  // API URL
-  // We determine host dynamically, fallback to localhost
+  // API Gateways
   const API_URL = window.location.origin.includes('localhost') 
     ? 'http://localhost:8080/api'
     : `${window.location.origin}/api`;
+
+  const AUTH_URL = window.location.origin.includes('localhost')
+    ? 'http://localhost:8081/api/auth'
+    : `${window.location.origin.replace('8080', '8081')}/api/auth`;
 
   // Sandbox fallback helpers
   const platePrefixes = ['MH-12', 'DL-3C', 'KA-03', 'KA-51', 'HR-26', 'UP-16', 'MH-02'];
@@ -50,6 +63,31 @@ function App() {
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setLogs(prev => [...prev, { time: timeStr, text: message, type }]);
   };
+
+  // Check stored token validity on launch
+  useEffect(() => {
+    const checkToken = async () => {
+      if (!token) return;
+      try {
+        const res = await fetch(`${AUTH_URL}/validate?token=${token}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.valid) {
+            setUserSession({ username: data.username, role: data.role });
+            addLog(`Authenticated successfully as '${data.username}' [JWT Session Verified].`, 'success');
+          } else {
+            handleLogout();
+            addLog("Stored session expired or invalid. Please log in.", 'error');
+          }
+        }
+      } catch (e) {
+        // Fallback for demo when auth-service might be launching or offline
+        setUserSession({ username: 'Demo Admin', role: 'ROLE_ADMIN' });
+        addLog("Auth microservice offline. Authenticated in Demo Sandbox mode.", 'info');
+      }
+    };
+    checkToken();
+  }, [token]);
 
   // Seed local slots for sandbox fallback
   const seedSandbox = () => {
@@ -138,8 +176,10 @@ function App() {
     }
   };
 
-  // Mount logic
+  // Mount logic for logged-in user
   useEffect(() => {
+    if (!userSession) return;
+
     const init = async () => {
       const connected = await checkConnection();
       if (connected) {
@@ -161,12 +201,79 @@ function App() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [isConnected]);
+  }, [isConnected, userSession]);
 
   // Scroll logs to bottom
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
+
+  // Handle Authentication Logic
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccess('');
+
+    if (!authUsername.trim() || !authPassword.trim()) {
+      setAuthError('Please fill in all credentials fields.');
+      return;
+    }
+
+    try {
+      if (isRegistering) {
+        // Register API Call
+        const res = await fetch(`${AUTH_URL}/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: authUsername, password: authPassword, role: authRole })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setAuthSuccess('Account registered successfully! You can now log in.');
+          setIsRegistering(false);
+          setAuthPassword('');
+        } else {
+          setAuthError(data.error || 'Registration failed.');
+        }
+      } else {
+        // Login API Call
+        const res = await fetch(`${AUTH_URL}/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: authUsername, password: authPassword })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          localStorage.setItem('token', data.token);
+          setToken(data.token);
+          // Token trigger useEffect will load user session
+        } else {
+          setAuthError(data.error || 'Invalid credentials.');
+        }
+      }
+    } catch (err) {
+      // In case auth-service is not running, let them bypass to demo environment
+      addLog("Auth microservice connection error. Simulating local token session.", "error");
+      const demoToken = "demo-jwt-session-token";
+      localStorage.setItem('token', demoToken);
+      setToken(demoToken);
+      setUserSession({ username: authUsername, role: 'ROLE_ADMIN' });
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setToken(null);
+    setUserSession(null);
+    setAuthUsername('');
+    setAuthPassword('');
+    addLog("User logged out successfully. Session revoked.", "info");
+  };
+
+  const prefillDemoCredentials = () => {
+    setAuthUsername('admin');
+    setAuthPassword('password123');
+  };
 
   // Park operation
   const handlePark = async (e) => {
@@ -299,7 +406,6 @@ function App() {
   const handleSlotClick = (slot) => {
     if (slot.occupied) {
       setExitPlate(slot.vehicleNumber);
-      // Auto duration hours calculation
       if (slot.entryTime) {
         try {
           const entry = new Date(slot.entryTime);
@@ -316,6 +422,101 @@ function App() {
     }
   };
 
+  // Render Login screen if not authenticated
+  if (!userSession) {
+    return (
+      <>
+        <div className="glow-bg glow-1"></div>
+        <div className="glow-bg glow-2"></div>
+        
+        <div className="login-screen-overlay">
+          <div className="login-card">
+            <div className="login-header">
+              <span className="login-logo">🔒</span>
+              <h2 className="login-title">AutoPark Control</h2>
+              <span className="login-subtitle">
+                {isRegistering ? 'Create secure manager account' : 'Access smart parking dashboard'}
+              </span>
+            </div>
+
+            {authError && <div className="login-error">{authError}</div>}
+            {authSuccess && <div className="login-success-msg">{authSuccess}</div>}
+
+            <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="form-group">
+                <label>Username</label>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  placeholder="Enter username" 
+                  value={authUsername}
+                  onChange={e => setAuthUsername(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Password</label>
+                <input 
+                  type="password" 
+                  className="form-control" 
+                  placeholder="Enter password"
+                  value={authPassword}
+                  onChange={e => setAuthPassword(e.target.value)}
+                  required
+                />
+              </div>
+
+              {isRegistering && (
+                <div className="form-group">
+                  <label>Assigned Security Role</label>
+                  <select 
+                    className="form-control"
+                    value={authRole}
+                    onChange={e => setAuthRole(e.target.value)}
+                  >
+                    <option value="ROLE_ADMIN">Administrator (ROLE_ADMIN)</option>
+                    <option value="ROLE_USER">Attendant (ROLE_USER)</option>
+                  </select>
+                </div>
+              )}
+
+              <button type="submit" className="btn-submit btn-primary">
+                {isRegistering ? 'Register Account' : 'Authenticate Security'}
+              </button>
+            </form>
+
+            <span className="login-toggle-text">
+              {isRegistering ? 'Already registered?' : 'Need security access?'}
+              <span 
+                className="login-toggle-link" 
+                style={{ marginLeft: '6px' }}
+                onClick={() => {
+                  setIsRegistering(!isRegistering);
+                  setAuthError('');
+                  setAuthSuccess('');
+                }}
+              >
+                {isRegistering ? 'Login here' : 'Sign up here'}
+              </span>
+            </span>
+
+            {/* Quick Demo Helper */}
+            {!isRegistering && (
+              <div className="demo-credentials-box">
+                <span className="demo-title">💡 Developer Demo Account</span>
+                <button type="button" className="demo-btn" onClick={prefillDemoCredentials}>
+                  Auto-Fill credentials (User: admin / Pass: password123)
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // Render main dashboard when authenticated
   return (
     <>
       {/* Background glowing globes */}
@@ -329,9 +530,23 @@ function App() {
             <span className="logo-icon">🚗</span>
             <span className="logo-text">AutoPark Cloud</span>
           </div>
-          <div className={`api-badge ${isConnected ? 'connected' : 'disconnected'}`}>
-            <span className="badge-dot"></span>
-            <span>{isConnected ? 'Railway DB Connected' : 'Demo Sandbox Mode'}</span>
+          
+          <div className="header-right">
+            <div className={`api-badge ${isConnected ? 'connected' : 'disconnected'}`}>
+              <span className="badge-dot"></span>
+              <span>{isConnected ? 'Railway DB Connected' : 'Demo Sandbox Mode'}</span>
+            </div>
+
+            <div className="user-profile-widget">
+              <span className="profile-avatar">
+                {userSession.username.substring(0, 2).toUpperCase()}
+              </span>
+              <span className="profile-name">{userSession.username}</span>
+            </div>
+
+            <button className="btn-logout" onClick={handleLogout}>
+              Sign Out
+            </button>
           </div>
         </header>
 
