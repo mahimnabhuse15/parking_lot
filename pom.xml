@@ -16,25 +16,12 @@
     <version>1.0-SNAPSHOT</version>
 
     <properties>
-        <maven.compiler.source>25</maven.compiler.source>
-        <maven.compiler.target>25</maven.compiler.target>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <javafx.version>21.0.2</javafx.version>
     </properties>
 
     <dependencies>
-        <!-- JavaFX Controls -->
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-controls</artifactId>
-            <version>${javafx.version}</version>
-        </dependency>
-        <!-- JavaFX Graphics -->
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-graphics</artifactId>
-            <version>${javafx.version}</version>
-        </dependency>
         <!-- MySQL JDBC Connector -->
         <dependency>
             <groupId>com.mysql</groupId>
@@ -56,37 +43,9 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>25</source>
-                    <target>25</target>
+                    <source>17</source>
+                    <target>17</target>
                 </configuration>
-            </plugin>
-            <!-- JavaFX Maven Plugin -->
-            <plugin>
-                <groupId>org.openjfx</groupId>
-                <artifactId>javafx-maven-plugin</artifactId>
-                <version>0.0.8</version>
-                <configuration>
-                    <mainClass>com.parking.Main</mainClass>
-                </configuration>
-            </plugin>
-            <!-- Copy Dependencies for Native JPackage Tool -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-dependency-plugin</artifactId>
-                <version>3.6.0</version>
-                <executions>
-                    <execution>
-                        <id>copy-dependencies</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>copy-dependencies</goal>
-                        </goals>
-                        <configuration>
-                            <outputDirectory>${project.build.directory}/libs</outputDirectory>
-                            <includeScope>runtime</includeScope>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
             <!-- Spring Boot Repackaging for Executable Fat JAR -->
             <plugin>
