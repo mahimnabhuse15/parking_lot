@@ -252,12 +252,8 @@ function App() {
         }
       }
     } catch (err) {
-      // In case auth-service is not running, let them bypass to demo environment
-      addLog("Auth microservice connection error. Simulating local token session.", "error");
-      const demoToken = "demo-jwt-session-token";
-      localStorage.setItem('token', demoToken);
-      setToken(demoToken);
-      setUserSession({ username: authUsername, role: 'ROLE_ADMIN' });
+      addLog("Auth microservice connection error. Failed to reach server.", "error");
+      setAuthError("Unable to connect to the authentication server. Please ensure the auth service is running.");
     }
   };
 
