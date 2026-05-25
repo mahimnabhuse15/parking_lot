@@ -9,12 +9,11 @@ RUN npm run build
 FROM maven:3.9.6-eclipse-temurin-17 AS backend-build
 WORKDIR /app
 COPY pom.xml ./
-COPY apache-maven-3.9.6/ ./apache-maven-3.9.6/
 COPY src/ ./src/
 # Copy built static assets from frontend stage to spring boot resources
 COPY --from=frontend-build /app/frontend/dist/ ./src/main/resources/static/
-# Run Maven package skipping tests
-RUN ./apache-maven-3.9.6/bin/mvn clean package -DskipTests
+# Run Maven package skipping tests using global maven
+RUN mvn clean package -DskipTests
 
 # Final minimal JRE run stage
 FROM eclipse-temurin:17-jre-alpine
