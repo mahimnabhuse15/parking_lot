@@ -19,6 +19,12 @@ function App() {
   const [vacantCount, setVacantCount] = useState(20);
   const [isConnected, setIsConnected] = useState(false);
 
+  // Billing Microservice State
+  const [invoices, setInvoices] = useState([]);
+  const [showInvoices, setShowInvoices] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+
   // Forms inputs
   const [parkPlate, setParkPlate] = useState('');
   const [parkType, setParkType] = useState('CAR');
@@ -42,6 +48,10 @@ function App() {
   const AUTH_URL = window.location.origin.includes('localhost')
     ? 'http://localhost:8081/api/auth'
     : `${window.location.origin.replace('8080', '8081')}/api/auth`;
+
+  const BILLING_URL = window.location.origin.includes('localhost')
+    ? 'http://localhost:8082/api/billing'
+    : `${window.location.origin.replace('8080', '8082')}/api/billing`;
 
   // Sandbox fallback helpers
   const platePrefixes = ['MH-12', 'DL-3C', 'KA-03', 'KA-51', 'HR-26', 'UP-16', 'MH-02'];
@@ -81,7 +91,7 @@ function App() {
           }
         }
       } catch (e) {
-        // Fallback for demo when auth-service might be launching or offline
+        // Fallback for demo when auth-service might be offline
         setUserSession({ username: 'Demo Admin', role: 'ROLE_ADMIN' });
         addLog("Auth microservice offline. Authenticated in Demo Sandbox mode.", 'info');
       }
@@ -176,6 +186,19 @@ function App() {
     }
   };
 
+  // Fetch billing history from Billing Service
+  const fetchInvoices = async () => {
+    try {
+      const res = await fetch(`${BILLING_URL}/invoices`);
+      if (res.ok) {
+        const data = await res.json();
+        setInvoices(data);
+      }
+    } catch (err) {
+      // Silent error when billing-service is offline
+    }
+  };
+
   // Mount logic for logged-in user
   useEffect(() => {
     if (!userSession) return;
@@ -189,6 +212,8 @@ function App() {
         seedSandbox();
         addLog("Local database offline. Initialized local Sandbox simulation.", "info");
       }
+      // Load billing data
+      await fetchInvoices();
     };
     init();
 
@@ -198,6 +223,7 @@ function App() {
       if (connected) {
         await fetchData();
       }
+      await fetchInvoices();
     }, 3000);
 
     return () => clearInterval(interval);
@@ -246,7 +272,6 @@ function App() {
         if (res.ok) {
           localStorage.setItem('token', data.token);
           setToken(data.token);
-          // Token trigger useEffect will load user session
         } else {
           setAuthError(data.error || 'Invalid credentials.');
         }
@@ -321,7 +346,7 @@ function App() {
     }
   };
 
-  // Exit operation
+  // Exit operation - integrated E2E with Billing microservice
   const handleExit = async (e) => {
     if (e) e.preventDefault();
     if (!exitPlate.trim()) return;
@@ -329,24 +354,67 @@ function App() {
 
     if (isConnected) {
       try {
+        // 1. Release slot in core app mysql db
         const res = await fetch(`${API_URL}/slots/release`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ plate, hours: exitHours })
         });
         const data = await res.json();
+        
         if (data.success) {
           const type = slots.find(s => s.vehicleNumber === plate)?.vehicleType || 'Car';
-          addLog(`Vehicle [${plate}] exited Slot #${data.slotNumber}. Paid: ₹${data.fee}`, 'success');
-          
-          setReceipt({
-            plate,
-            type,
-            hours: exitHours,
-            rate: type === 'Car' ? 50 : 20,
-            fee: data.fee,
-            slotNumber: data.slotNumber
-          });
+          const rate = type === 'Car' ? 50 : 20;
+
+          // 2. Call Billing Microservice on Port 8082 for detailed invoicing
+          try {
+            const billingRes = await fetch(`${BILLING_URL}/invoice`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                vehicleNumber: plate,
+                vehicleType: type === 'Car' ? 'CAR' : 'BIKE',
+                hoursParked: exitHours,
+                hourlyRate: rate
+              })
+            });
+
+            if (billingRes.ok) {
+              const inv = await billingRes.json();
+              
+              // Load rich invoice into Modal state
+              setReceipt({
+                plate,
+                type,
+                hours: exitHours,
+                rate,
+                invoiceId: inv.invoiceId,
+                subtotal: inv.subtotal,
+                cgst: inv.cgst,
+                sgst: inv.sgst,
+                fee: inv.grandTotal, // Grand total containing CGST and SGST
+                slotNumber: data.slotNumber,
+                formattedReceipt: inv.formattedReceipt
+              });
+
+              addLog(`Invoice [${inv.invoiceId}] successfully generated on Billing Microservice (Port 8082).`, 'success');
+              // Refresh invoice database
+              fetchInvoices();
+            } else {
+              throw new Error("Invoicing failed");
+            }
+          } catch (billErr) {
+            // Offline fallback
+            addLog("Billing service unreachable. Generated flat invoice fallback.", "info");
+            setReceipt({
+              plate,
+              type,
+              hours: exitHours,
+              rate,
+              fee: data.fee,
+              slotNumber: data.slotNumber
+            });
+          }
 
           setExitPlate('');
           setExitHours(1);
@@ -533,6 +601,10 @@ function App() {
               <span>{isConnected ? 'Railway DB Connected' : 'Demo Sandbox Mode'}</span>
             </div>
 
+            <button className="btn-registry" onClick={() => { fetchInvoices(); setShowInvoices(true); }}>
+              📋 Invoices Registry ({invoices.length})
+            </button>
+
             <div className="user-profile-widget">
               <span className="profile-avatar">
                 {userSession.username.substring(0, 2).toUpperCase()}
@@ -716,37 +788,141 @@ function App() {
       {/* Modal invoice receipt */}
       {receipt && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content" style={{ borderColor: 'var(--color-vacant)', maxWidth: '440px' }}>
             <div className="modal-check">✓</div>
             <span className="modal-title">DEPARTURE RECEIPT</span>
-            <div className="modal-grid">
-              <div className="modal-row">
-                <span className="modal-label">SLOT NUMBER:</span>
-                <span className="modal-val">#{receipt.slotNumber}</span>
+            
+            {receipt.invoiceId && (
+              <span style={{ fontSize: '11px', color: 'var(--accent-cyan)', fontWeight: '700', marginTop: '-10px' }}>
+                INVOICE ID: {receipt.invoiceId}
+              </span>
+            )}
+
+            {!showTerminal ? (
+              <div className="modal-grid">
+                <div className="modal-row">
+                  <span className="modal-label">SLOT NUMBER:</span>
+                  <span className="modal-val">#{receipt.slotNumber}</span>
+                </div>
+                <div className="modal-row">
+                  <span className="modal-label">VEHICLE PLATE:</span>
+                  <span className="modal-val">{receipt.plate}</span>
+                </div>
+                <div className="modal-row">
+                  <span className="modal-label">HOURS PARKED:</span>
+                  <span className="modal-val">{receipt.hours} Hours</span>
+                </div>
+                {receipt.subtotal !== undefined && (
+                  <>
+                    <div className="modal-row">
+                      <span className="modal-label">SUBTOTAL:</span>
+                      <span className="modal-val">₹{receipt.subtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="modal-row">
+                      <span className="modal-label">CGST (9.0%):</span>
+                      <span className="modal-val">₹{receipt.cgst.toFixed(2)}</span>
+                    </div>
+                    <div className="modal-row">
+                      <span className="modal-label">SGST (9.0%):</span>
+                      <span className="modal-val">₹{receipt.sgst.toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="modal-row">
-                <span className="modal-label">VEHICLE PLATE:</span>
-                <span className="modal-val">{receipt.plate}</span>
-              </div>
-              <div className="modal-row">
-                <span className="modal-label">VEHICLE TYPE:</span>
-                <span className="modal-val">{receipt.type}</span>
-              </div>
-              <div className="modal-row">
-                <span className="modal-label">HOURS PARKED:</span>
-                <span className="modal-val">{receipt.hours} Hours</span>
-              </div>
-              <div className="modal-row">
-                <span className="modal-label">HOURLY RATE:</span>
-                <span className="modal-val">{isConnected ? '₹' : '$'}{receipt.rate} / hour</span>
-              </div>
-            </div>
+            ) : (
+              <pre className="terminal-receipt-box">
+                {receipt.formattedReceipt}
+              </pre>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <span className="modal-fee-label">Total Fee Paid</span>
-              <span className="modal-fee">{isConnected ? '₹' : '$'}{receipt.fee}</span>
+              <span className="modal-fee">₹{receipt.fee.toFixed(2)}</span>
             </div>
-            <button className="btn btn-primary" style={{ width: '180px' }} onClick={() => setReceipt(null)}>
-              Print & Dismiss
+
+            <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              {receipt.formattedReceipt && (
+                <button 
+                  className="btn-inspect" 
+                  style={{ flex: 1, padding: '12px', fontSize: '12px', borderRadius: '12px' }}
+                  onClick={() => setShowTerminal(!showTerminal)}
+                >
+                  {showTerminal ? '📋 Hide Terminal' : '📟 View Terminal'}
+                </button>
+              )}
+              <button 
+                className="btn btn-primary" 
+                style={{ flex: 1, margin: 0, padding: '12px', borderRadius: '12px' }} 
+                onClick={() => { setReceipt(null); setShowTerminal(false); }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invoices Registry Modal */}
+      {showInvoices && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ borderColor: '#10b981', maxWidth: '500px' }}>
+            <div className="modal-check" style={{ backgroundColor: '#10b981', boxShadow: '0 0 15px rgba(16, 185, 129, 0.3)' }}>📋</div>
+            <span className="modal-title" style={{ color: '#10b981' }}>INVOICES HISTORY REGISTRY</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '-10px' }}>
+              Fetched live from Billing Microservice on Port 8082
+            </span>
+
+            {selectedReceipt ? (
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <pre className="terminal-receipt-box" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                  {selectedReceipt}
+                </pre>
+                <button 
+                  className="btn-inspect" 
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px' }}
+                  onClick={() => setSelectedReceipt(null)}
+                >
+                  ◀ Back to List
+                </button>
+              </div>
+            ) : (
+              <div className="invoice-list-container">
+                {invoices.length === 0 ? (
+                  <div style={{ textSelf: 'center', color: 'var(--text-muted)', padding: '20px', textAlign: 'center', fontSize: '13px' }}>
+                    No invoices generated yet.
+                  </div>
+                ) : (
+                  invoices.map(inv => (
+                    <div key={inv.id} className="invoice-item-card">
+                      <div className="invoice-item-info">
+                        <span className="invoice-item-id">{inv.invoiceId}</span>
+                        <span className="invoice-item-sub">
+                          {inv.vehicleNumber} ({inv.vehicleType}) • {inv.hoursParked}h
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '800', color: '#10b981' }}>
+                          ₹{inv.grandTotal.toFixed(2)}
+                        </span>
+                        <button 
+                          className="btn-inspect"
+                          onClick={() => setSelectedReceipt(inv.formattedReceipt)}
+                        >
+                          Inspect 📟
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            <button 
+              className="btn btn-primary" 
+              style={{ width: '100%', backgroundColor: '#10b981', boxShadow: 'none' }}
+              onClick={() => { setShowInvoices(false); setSelectedReceipt(null); }}
+            >
+              Close Registry
             </button>
           </div>
         </div>

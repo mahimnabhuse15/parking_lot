@@ -775,3 +775,100 @@ body {
     background: rgba(254, 80, 95, 0.05);
 }
 
+/* ==========================================================================
+   Microservice Invoices Registry UI & Terminal Styles
+   ========================================================================== */
+
+.btn-registry {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+    padding: 6px 14px;
+    border-radius: 30px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+}
+.btn-registry:hover {
+    background: rgba(16, 185, 129, 0.2);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+    transform: translateY(-1px);
+}
+
+.terminal-receipt-box {
+    background: #04060d !important;
+    border: 1px solid #10b981 !important;
+    color: #10b981 !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    font-size: 13px !important;
+    padding: 18px !important;
+    border-radius: var(--radius-md) !important;
+    white-space: pre !important;
+    text-align: left !important;
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.15) !important;
+    margin: 10px 0 !important;
+    overflow-x: auto !important;
+    line-height: 1.32 !important;
+}
+
+.invoice-list-container {
+    width: 100%;
+    max-height: 250px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 10px 0;
+    padding-right: 4px;
+}
+
+.invoice-item-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    transition: var(--transition-smooth);
+}
+.invoice-item-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--accent-cyan);
+}
+
+.invoice-item-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.invoice-item-id {
+    font-size: 12px;
+    font-weight: 700;
+    color: white;
+}
+
+.invoice-item-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.btn-inspect {
+    background: rgba(0, 229, 255, 0.1);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    color: var(--accent-cyan);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+}
+.btn-inspect:hover {
+    background: rgba(0, 229, 255, 0.25);
+    box-shadow: 0 0 8px var(--accent-cyan-glow);
+}
+
+
