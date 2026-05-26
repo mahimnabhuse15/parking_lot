@@ -46,12 +46,12 @@ function App() {
     : `${window.location.origin}/api`;
 
   const AUTH_URL = window.location.origin.includes('localhost')
-    ? 'http://localhost:8081/api/auth'
-    : `${window.location.origin.replace('8080', '8081')}/api/auth`;
+    ? 'http://localhost:8080/api/auth'
+    : `${window.location.origin}/api/auth`;
 
   const BILLING_URL = window.location.origin.includes('localhost')
-    ? 'http://localhost:8082/api/billing'
-    : `${window.location.origin.replace('8080', '8082')}/api/billing`;
+    ? 'http://localhost:8080/api/billing'
+    : `${window.location.origin}/api/billing`;
 
   // Sandbox fallback helpers
   const platePrefixes = ['MH-12', 'DL-3C', 'KA-03', 'KA-51', 'HR-26', 'UP-16', 'MH-02'];
@@ -366,7 +366,7 @@ function App() {
           const type = slots.find(s => s.vehicleNumber === plate)?.vehicleType || 'Car';
           const rate = type === 'Car' ? 50 : 20;
 
-          // 2. Call Billing Microservice on Port 8082 for detailed invoicing
+          // 2. Call Consolidated Billing Module for detailed invoicing
           try {
             const billingRes = await fetch(`${BILLING_URL}/invoice`, {
               method: 'POST',
@@ -397,7 +397,7 @@ function App() {
                 formattedReceipt: inv.formattedReceipt
               });
 
-              addLog(`Invoice [${inv.invoiceId}] successfully generated on Billing Microservice (Port 8082).`, 'success');
+              addLog(`Invoice [${inv.invoiceId}] successfully generated on Consolidated Billing Module.`, 'success');
               // Refresh invoice database
               fetchInvoices();
             } else {
@@ -869,7 +869,7 @@ function App() {
             <div className="modal-check" style={{ backgroundColor: '#10b981', boxShadow: '0 0 15px rgba(16, 185, 129, 0.3)' }}>📋</div>
             <span className="modal-title" style={{ color: '#10b981' }}>INVOICES HISTORY REGISTRY</span>
             <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '-10px' }}>
-              Fetched live from Billing Microservice on Port 8082
+              Fetched live from Consolidated Billing Module
             </span>
 
             {selectedReceipt ? (
